@@ -16,7 +16,6 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowUpDown, ChevronDown } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,7 +42,7 @@ import {
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { addDays } from "date-fns";
 
-type FileData = { [key: string]: string };
+type FileData = { [key: string]: string | number | null };
 
 export default function Dashboard() {
   const [fileData, setFileData] = useState<FileData[]>([]);
@@ -86,30 +85,56 @@ export default function Dashboard() {
 
       if (fileExtension === "csv") {
         Papa.parse(file, {
-          worker: true, // Procesamiento en un worker para grandes cantidades de datos
-          complete: (result) => {
-            console.log("CSV Data:", result.data);
-            const data = result.data as FileData[];
-            setFileData(data);
-            createColumns(Object.keys(data[0] || {}));
-          },
+          worker: true,
           header: true,
+          skipEmptyLines: true,
+          dynamicTyping: true,
+          complete: (result) => {
+            console.log("Datos CSV procesados:", result.data);
+            const data = result.data as FileData[];
+            if (
+              Array.isArray(data) &&
+              data.length > 0 &&
+              typeof data[0] === "object"
+            ) {
+              setFileData(data);
+              createColumns(Object.keys(data[0]));
+            } else {
+              alert("El archivo CSV no contiene datos válidos o está vacío.");
+            }
+          },
+          error: (error) => {
+            console.error("Error de PapaParse:", error);
+            alert("Hubo un error al procesar el archivo CSV.");
+          },
         });
       } else if (fileExtension === "xlsx" || fileExtension === "xls") {
         const reader = new FileReader();
         reader.onload = (evt) => {
           const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: "binary" });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws) as FileData[];
-          console.log("Excel Data:", data);
-          setFileData(data);
-          createColumns(Object.keys(data[0] || {}));
+          if (typeof bstr === "string") {
+            const wb = XLSX.read(bstr, { type: "binary" });
+            const wsname = wb.SheetNames[0];
+            const ws = wb.Sheets[wsname];
+            const data = XLSX.utils.sheet_to_json(ws, {
+              defval: "",
+            }) as FileData[];
+            console.log("Datos Excel procesados:", data);
+            if (data.length > 0) {
+              setFileData(data);
+              createColumns(Object.keys(data[0]));
+            } else {
+              alert("El archivo Excel no contiene datos válidos.");
+            }
+          } else {
+            alert("No se pudo leer el archivo correctamente.");
+          }
         };
         reader.readAsBinaryString(file);
       } else {
-        alert("Por favor, sube un archivo CSV o Excel (.xlsx, .xls)");
+        alert(
+          "Por favor, suba un archivo en formato CSV o Excel (.xlsx, .xls)."
+        );
       }
     }
   };
@@ -118,17 +143,15 @@ export default function Dashboard() {
     const cols: ColumnDef<FileData, unknown>[] = headers.map((header) => ({
       accessorKey: header,
       id: header,
-      header: ({ column }) => {
-        return (
-          <Button
-            variant="ghost"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            {header}
-            <ArrowUpDown className="ml-2 h-4 w-4" />
-          </Button>
-        );
-      },
+      header: ({ column }) => (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+        >
+          {header}
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      ),
       cell: ({ row }) => <div>{row.getValue(header)}</div>,
     }));
 
@@ -178,7 +201,6 @@ export default function Dashboard() {
       return acc;
     }, {} as VisibilityState);
     setColumnVisibility(initialVisibility);
-
     setColumns(cols);
   };
 
@@ -262,11 +284,14 @@ export default function Dashboard() {
 
   const filteredData = useMemo(() => {
     return fileData.filter((row) => {
-      const startDate = new Date(row["Campo personalizado (Actual start)"]);
+      const startDate = new Date(
+        row["Campo personalizado (Actual start)"] ?? ""
+      );
       const matchesDateRange =
         startDate >= dateRange.from && startDate <= dateRange.to;
       const matchesSprint = row["Sprint"]
-        ?.toLowerCase()
+        ?.toString()
+        .toLowerCase()
         .includes(sprintFilter.toLowerCase());
 
       return matchesDateRange && matchesSprint;
@@ -275,8 +300,10 @@ export default function Dashboard() {
 
   const totalHours = useMemo(() => {
     const total = filteredData.reduce((sum, row) => {
-      const startDate = new Date(row["Campo personalizado (Actual start)"]);
-      const endDate = new Date(row["Resuelta"]);
+      const startDate = new Date(
+        row["Campo personalizado (Actual start)"] ?? ""
+      );
+      const endDate = new Date(row["Resuelta"] ?? "");
 
       const hours = parseFloat(calculateWorkingHours(startDate, endDate));
 
@@ -297,15 +324,19 @@ export default function Dashboard() {
       const filteredRow: { [key: string]: string | number } = {};
       visibleColumns.forEach((col) => {
         if (col === "diasLaborales") {
-          const startDate = new Date(row["Campo personalizado (Actual start)"]);
-          const endDate = new Date(row["Resuelta"]);
+          const startDate = new Date(
+            row["Campo personalizado (Actual start)"] ?? ""
+          );
+          const endDate = new Date(row["Resuelta"] ?? "");
           filteredRow[col] = calculateWorkingDays(startDate, endDate);
         } else if (col === "horasLaborales") {
-          const startDate = new Date(row["Campo personalizado (Actual start)"]);
-          const endDate = new Date(row["Resuelta"]);
+          const startDate = new Date(
+            row["Campo personalizado (Actual start)"] ?? ""
+          );
+          const endDate = new Date(row["Resuelta"] ?? "");
           filteredRow[col] = calculateWorkingHours(startDate, endDate);
         } else {
-          filteredRow[col] = row[col];
+          filteredRow[col] = row[col] ?? "";
         }
       });
       return filteredRow;
@@ -347,10 +378,10 @@ export default function Dashboard() {
   }, [pageSize, table]);
 
   return (
-    <div className="container mx-auto p-4">
+    <div className="container mx-auto p-4 overflow-x-auto">
       <h1 className="text-3xl font-bold mb-6">Dashboard de Datos</h1>
 
-      <div className="mb-6">
+      <div className="mb-6 w-full max-w-md flex flex-col">
         <label
           htmlFor="file-upload"
           className="block text-sm font-medium text-gray-700 mb-2"
@@ -362,11 +393,11 @@ export default function Dashboard() {
           type="file"
           onChange={handleFileUpload}
           accept=".csv, .xlsx, .xls"
-          className="file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100"
+          className="file:mr-6 file:py-2 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:w-auto file:overflow-visible h-12"
         />
       </div>
 
-      <div className="mb-6">
+      <div className="mb-6 w-full max-w-md">
         <label
           htmlFor="holiday-input"
           className="block text-sm font-medium text-gray-700 mb-2"
@@ -426,15 +457,17 @@ export default function Dashboard() {
               onChange={(e) => setSprintFilter(e.target.value)}
               className="max-w-sm"
             />
-            <DatePickerWithRange
-              date={dateRange}
-              setDate={(date) =>
-                setDateRange({
-                  from: date?.from ?? new Date(),
-                  to: date?.to ?? new Date(),
-                })
-              }
-            />
+            <div className="w-full">
+              <DatePickerWithRange
+                date={dateRange}
+                setDate={(date) =>
+                  setDateRange({
+                    from: date?.from ?? new Date(),
+                    to: date?.to ?? new Date(),
+                  })
+                }
+              />
+            </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="ml-auto">

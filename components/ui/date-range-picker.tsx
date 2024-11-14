@@ -3,6 +3,7 @@
 import * as React from "react";
 import { CalendarIcon } from "@radix-ui/react-icons";
 import { format } from "date-fns";
+import { es } from "date-fns/locale"; // Importar el idioma español
 import { DateRange } from "react-day-picker";
 
 import { cn } from "@/lib/utils";
@@ -38,14 +39,14 @@ export function DatePickerWithRange({
             {date?.from ? (
               date.to ? (
                 <>
-                  {format(date.from, "LLL dd, y")} -{" "}
-                  {format(date.to, "LLL dd, y")}
+                  {format(date.from, "dd 'de' MMMM 'de' yyyy", { locale: es })}{" "}
+                  - {format(date.to, "dd 'de' MMMM 'de' yyyy", { locale: es })}
                 </>
               ) : (
-                format(date.from, "LLL dd, y")
+                format(date.from, "dd 'de' MMMM 'de' yyyy", { locale: es })
               )
             ) : (
-              <span>Pick a date</span>
+              <span>Selecciona una fecha</span>
             )}
           </Button>
         </PopoverTrigger>
@@ -57,6 +58,7 @@ export function DatePickerWithRange({
             selected={date}
             onSelect={setDate}
             numberOfMonths={2}
+            locale={es} // Configuración de idioma
           />
         </PopoverContent>
       </Popover>
