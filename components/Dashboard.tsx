@@ -43,6 +43,7 @@ import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { addDays } from "date-fns";
 
 type FileData = { [key: string]: string | number | null };
+type CsvRow = Record<string, string>;
 
 export default function Dashboard() {
   const [fileData, setFileData] = useState<FileData[]>([]);
@@ -78,65 +79,125 @@ export default function Dashboard() {
     to: new Date(),
   });
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const fileExtension = file.name.split(".").pop()?.toLowerCase();
+  const [data, setData] = useState<CsvRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-      if (fileExtension === "csv") {
-        Papa.parse(file, {
-          worker: true,
-          header: true,
-          skipEmptyLines: true,
-          dynamicTyping: true,
-          complete: (result) => {
-            console.log("Datos CSV procesados:", result.data);
-            const data = result.data as FileData[];
-            if (
-              Array.isArray(data) &&
-              data.length > 0 &&
-              typeof data[0] === "object"
-            ) {
-              setFileData(data);
-              createColumns(Object.keys(data[0]));
-            } else {
-              alert("El archivo CSV no contiene datos válidos o está vacío.");
-            }
-          },
-          error: (error) => {
-            console.error("Error de PapaParse:", error);
-            alert("Hubo un error al procesar el archivo CSV.");
-          },
-        });
-      } else if (fileExtension === "xlsx" || fileExtension === "xls") {
-        const reader = new FileReader();
-        reader.onload = (evt) => {
-          const bstr = evt.target?.result;
-          if (typeof bstr === "string") {
-            const wb = XLSX.read(bstr, { type: "binary" });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            const data = XLSX.utils.sheet_to_json(ws, {
-              defval: "",
-            }) as FileData[];
-            console.log("Datos Excel procesados:", data);
-            if (data.length > 0) {
-              setFileData(data);
-              createColumns(Object.keys(data[0]));
-            } else {
-              alert("El archivo Excel no contiene datos válidos.");
-            }
-          } else {
-            alert("No se pudo leer el archivo correctamente.");
-          }
-        };
-        reader.readAsBinaryString(file);
-      } else {
-        alert(
-          "Por favor, suba un archivo en formato CSV o Excel (.xlsx, .xls)."
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    console.log("se setea el file");
+    if (!file) {
+      setError("No se seleccionó ningún archivo.");
+      return;
+    }
+
+    // Verifica que el archivo tenga la extensión correcta
+    if (!file.name.endsWith(".csv")) {
+      setError("Por favor, selecciona un archivo con extensión .csv");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const csvContent = e.target?.result as string;
+      console.log("Contenido del archivo:", csvContent);
+
+      try {
+        // Procesar el contenido del archivo
+        const parsedData = parseCsvManually(csvContent);
+        console.log("Datos CSV procesados:", parsedData);
+        createColumns(Object.keys(parsedData[0]));
+        setData(parsedData);
+        setError(null); // Limpiar errores anteriores
+      } catch (parseError) {
+        setError(`Error procesando el archivo: ${parseError}`);
+      }
+    };
+
+    reader.onerror = () => {
+      setError("Error leyendo el archivo.");
+    };
+
+    reader.readAsText(file); // Leer el archivo como texto
+  };
+
+  const parseCsvManually = (csvContent: string): Record<string, string>[] => {
+    // Dividir las filas considerando saltos de línea
+    const rows = csvContent
+      .split(/\r?\n/) // Soporte para diferentes sistemas operativos
+      .filter((line) => line.trim() !== ""); // Eliminar filas vacías
+
+    if (rows.length < 2) {
+      throw new Error(
+        "El archivo CSV debe tener al menos una fila de encabezados y una fila de datos."
+      );
+    }
+
+    // Extraer encabezados
+    const headers = extractCsvRowValues(rows[0]);
+    console.log("Encabezados CSV procesados:", headers);
+
+    // Procesar las filas restantes
+    const data = rows.slice(1).map((row, rowIndex) => {
+      const values = extractCsvRowValues(row);
+
+      if (values.length !== headers.length) {
+        console.warn(
+          `Advertencia: La fila ${
+            rowIndex + 2
+          } no coincide con el número de encabezados.`
         );
       }
+
+      // Combinar encabezados y valores
+      return headers.reduce<Record<string, string>>((obj, header, index) => {
+        obj[header] = values[index] || ""; // Asignar valores o cadenas vacías si faltan
+        return obj;
+      }, {});
+    });
+
+    console.log("Datos procesados:", data);
+    return data;
+  };
+
+  // Mejorada: Extraer valores considerando comillas y comas internas
+  const extractCsvRowValues = (row: string): string[] => {
+    const values: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < row.length; i++) {
+      const char = row[i];
+
+      if (char === '"' && (i === 0 || row[i - 1] !== "\\")) {
+        // Cambiar el estado de las comillas
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        // Encontrar coma fuera de comillas; finalizar valor actual
+        if (row[i + 1] === " ") {
+          current += char;
+        } else {
+          values.push(current.trim());
+          current = "";
+        }
+      } else {
+        // Agregar carácter al valor actual
+        if (inQuotes) {
+          inQuotes = !inQuotes;
+        }
+        current += char;
+      }
     }
+
+    if (current) {
+      values.push(current.trim());
+    }
+
+    // Limpiar comillas externas y manejar dobles comillas escapadas
+    return values.map((value) =>
+      value.startsWith('"') && value.endsWith('"')
+        ? value.slice(1, -1).replace(/""/g, '"') // Eliminar dobles comillas escapadas
+        : value
+    );
   };
 
   const createColumns = (headers: string[]) => {
@@ -391,7 +452,7 @@ export default function Dashboard() {
         <Input
           id="file-upload"
           type="file"
-          onChange={handleFileUpload}
+          onChange={handleFileChange}
           accept=".csv, .xlsx, .xls"
           className="file:mr-6 file:py-2 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:w-auto file:overflow-visible h-12"
         />
