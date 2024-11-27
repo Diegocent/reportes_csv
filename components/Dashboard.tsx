@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import * as XLSX from "xlsx";
-import Papa from "papaparse";
+import React, { useState, useEffect, useMemo } from "react";
+
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -39,11 +38,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DatePickerWithRange } from "@/components/ui/date-range-picker";
+
 import { addDays } from "date-fns";
+import { DateRangePicker } from "./DateRangePicker";
+import { FileUpload } from "./FileUpload";
+import {
+  calculateWorkingDays,
+  calculateWorkingHours,
+} from "./utils/calcularHorasDias";
+import { parseCsvManually } from "./utils/parseCsv";
+import { exportToExcel } from "./utils/exportExcel";
 
 type FileData = { [key: string]: string | number | null };
-type CsvRow = Record<string, string>;
 
 export default function Dashboard() {
   const [fileData, setFileData] = useState<FileData[]>([]);
@@ -65,12 +71,11 @@ export default function Dashboard() {
     "horasLaborales",
   ];
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
-    () => {
-      return defaultVisibleColumns.reduce((acc, col) => {
+    () =>
+      defaultVisibleColumns.reduce((acc, col) => {
         acc[col] = true;
         return acc;
-      }, {} as VisibilityState);
-    }
+      }, {} as VisibilityState)
   );
   const [rowSelection, setRowSelection] = useState({});
   const [pageSize, setPageSize] = useState(10);
@@ -79,125 +84,46 @@ export default function Dashboard() {
     to: new Date(),
   });
 
-  const [data, setData] = useState<CsvRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    console.log("se setea el file");
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) {
-      setError("No se seleccionó ningún archivo.");
+      alert("No se seleccionó ningún archivo.");
       return;
     }
 
-    // Verifica que el archivo tenga la extensión correcta
-    if (!file.name.endsWith(".csv")) {
-      setError("Por favor, selecciona un archivo con extensión .csv");
-      return;
-    }
+    const fileExtension = file.name.split(".").pop()?.toLowerCase();
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const csvContent = e.target?.result as string;
-      console.log("Contenido del archivo:", csvContent);
+    if (fileExtension === "csv") {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const csvContent = e.target?.result as string;
+        console.log("Contenido del archivo:", csvContent);
 
-      try {
-        // Procesar el contenido del archivo
-        const parsedData = parseCsvManually(csvContent);
-        console.log("Datos CSV procesados:", parsedData);
-        createColumns(Object.keys(parsedData[0]));
-        setData(parsedData);
-        setError(null); // Limpiar errores anteriores
-      } catch (parseError) {
-        setError(`Error procesando el archivo: ${parseError}`);
-      }
-    };
+        try {
+          // Procesar el contenido del archivo
+          const parsedData = parseCsvManually(csvContent);
+          console.log("Datos CSV procesados:", parsedData);
 
-    reader.onerror = () => {
-      setError("Error leyendo el archivo.");
-    };
-
-    reader.readAsText(file); // Leer el archivo como texto
-  };
-
-  const parseCsvManually = (csvContent: string): Record<string, string>[] => {
-    // Dividir las filas considerando saltos de línea
-    const rows = csvContent
-      .split(/\r?\n/) // Soporte para diferentes sistemas operativos
-      .filter((line) => line.trim() !== ""); // Eliminar filas vacías
-
-    if (rows.length < 2) {
-      throw new Error(
-        "El archivo CSV debe tener al menos una fila de encabezados y una fila de datos."
-      );
-    }
-
-    // Extraer encabezados
-    const headers = extractCsvRowValues(rows[0]);
-    console.log("Encabezados CSV procesados:", headers);
-
-    // Procesar las filas restantes
-    const data = rows.slice(1).map((row, rowIndex) => {
-      const values = extractCsvRowValues(row);
-
-      if (values.length !== headers.length) {
-        console.warn(
-          `Advertencia: La fila ${
-            rowIndex + 2
-          } no coincide con el número de encabezados.`
-        );
-      }
-
-      // Combinar encabezados y valores
-      return headers.reduce<Record<string, string>>((obj, header, index) => {
-        obj[header] = values[index] || ""; // Asignar valores o cadenas vacías si faltan
-        return obj;
-      }, {});
-    });
-
-    console.log("Datos procesados:", data);
-    return data;
-  };
-
-  // Mejorada: Extraer valores considerando comillas y comas internas
-  const extractCsvRowValues = (row: string): string[] => {
-    const values: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < row.length; i++) {
-      const char = row[i];
-
-      if (char === '"' && (i === 0 || row[i - 1] !== "\\")) {
-        // Cambiar el estado de las comillas
-        inQuotes = !inQuotes;
-      } else if (char === "," && !inQuotes) {
-        // Encontrar coma fuera de comillas; finalizar valor actual
-        if (row[i + 1] === " ") {
-          current += char;
-        } else {
-          values.push(current.trim());
-          current = "";
+          if (parsedData.length > 0) {
+            setFileData(parsedData);
+            createColumns(Object.keys(parsedData[0])); // Crear columnas dinámicamente
+          } else {
+            alert("El archivo CSV no contiene datos válidos.");
+          }
+        } catch (error) {
+          console.error("Error procesando el archivo CSV:", error);
+          alert("Hubo un error al procesar el archivo CSV.");
         }
-      } else {
-        // Agregar carácter al valor actual
-        if (inQuotes) {
-          inQuotes = !inQuotes;
-        }
-        current += char;
-      }
-    }
+      };
 
-    if (current) {
-      values.push(current.trim());
-    }
+      reader.onerror = () => {
+        alert("Error leyendo el archivo.");
+      };
 
-    // Limpiar comillas externas y manejar dobles comillas escapadas
-    return values.map((value) =>
-      value.startsWith('"') && value.endsWith('"')
-        ? value.slice(1, -1).replace(/""/g, '"') // Eliminar dobles comillas escapadas
-        : value
-    );
+      reader.readAsText(file); // Leer el archivo como texto
+    } else {
+      alert("Por favor, suba un archivo en formato CSV.");
+    }
   };
 
   const createColumns = (headers: string[]) => {
@@ -214,55 +140,53 @@ export default function Dashboard() {
         </Button>
       ),
       cell: ({ row }) => <div>{row.getValue(header)}</div>,
+      filterFn: (row, columnId, filterValue) => {
+        const cellValue =
+          row.getValue(columnId)?.toString()?.toLowerCase() ?? "";
+        return cellValue.includes(filterValue.toLowerCase());
+      },
     }));
 
-    cols.push(
-      {
+    // Agregar columnas calculadas si están en las columnas visibles por defecto
+    if (defaultVisibleColumns.includes("diasLaborales")) {
+      cols.push({
         accessorKey: "diasLaborales",
         id: "diasLaborales",
         header: "Días laborales",
         cell: ({ row }) => {
-          const startDate = new Date(
-            row.getValue("Campo personalizado (Actual start)")
-          );
-          let endDate = new Date(row.getValue("Resuelta"));
-          if (isNaN(endDate.getTime())) {
-            if (row.getValue("Estado") === "Finalizada") {
-              endDate = new Date(row.getValue("Actualizada"));
-            } else {
-              return "N/A";
-            }
-          }
-          return calculateWorkingDays(startDate, endDate);
+          const startDate = row.getValue(
+            "Campo personalizado (Actual start)"
+          ) as Date | null;
+          const endDate = row.getValue("Resuelta") as Date | null;
+          return calculateWorkingDays(startDate, endDate, holidays);
         },
-      },
-      {
+      });
+    }
+
+    if (defaultVisibleColumns.includes("horasLaborales")) {
+      cols.push({
         accessorKey: "horasLaborales",
         id: "horasLaborales",
         header: "Horas laborales",
         cell: ({ row }) => {
-          const startDate = new Date(
-            row.getValue("Campo personalizado (Actual start)")
-          );
-          let endDate = new Date(row.getValue("Resuelta"));
-          if (isNaN(endDate.getTime())) {
-            if (row.getValue("Estado") === "Finalizada") {
-              endDate = new Date(row.getValue("Actualizada"));
-            } else {
-              return "N/A";
-            }
-          }
-          return calculateWorkingHours(startDate, endDate);
+          const startDate = row.getValue(
+            "Campo personalizado (Actual start)"
+          ) as Date | null;
+          const endDate = row.getValue("Resuelta") as Date | null;
+          return calculateWorkingHours(startDate, endDate, holidays);
         },
-      }
-    );
+      });
+    }
 
-    const initialVisibility = cols.reduce((acc, col) => {
-      acc[col.id as string] = defaultVisibleColumns.includes(col.id as string);
-      return acc;
-    }, {} as VisibilityState);
-    setColumnVisibility(initialVisibility);
     setColumns(cols);
+
+    // Sincronizar visibilidad de columnas
+    setColumnVisibility(() =>
+      headers.reduce((acc, header) => {
+        acc[header] = defaultVisibleColumns.includes(header);
+        return acc;
+      }, {} as VisibilityState)
+    );
   };
 
   const addHoliday = () => {
@@ -279,94 +203,42 @@ export default function Dashboard() {
     setHolidays(holidays.filter((_, i) => i !== index));
   };
 
-  const calculateWorkingDays = (start: Date, end: Date) => {
-    if (start >= end) return 0;
-
-    let count = 0;
-    const curDate = new Date(start);
-
-    while (curDate <= end) {
-      const dayOfWeek = curDate.getDay();
-      const isHoliday = holidays.some(
-        (h) => h.toDateString() === curDate.toDateString()
-      );
-
-      // Contar el día solo si es un día laboral (lunes a viernes) y no es feriado
-      if (dayOfWeek >= 1 && dayOfWeek <= 5 && !isHoliday) {
-        count++;
-      }
-      curDate.setDate(curDate.getDate() + 1);
-    }
-
-    return count >= 1 && count * 8 >= 8 ? count : 0;
-  };
-
-  const calculateWorkingHours = (start: Date, end: Date) => {
-    if (start >= end) return "0.00";
-
-    const workHoursPerDay = 8; // Asumimos 8 horas de trabajo diarias
-    let totalHours = 0;
-    const currentDate = new Date(start);
-
-    while (currentDate <= end) {
-      const dayOfWeek = currentDate.getDay();
-      const isHoliday = holidays.some(
-        (h) => h.toDateString() === currentDate.toDateString()
-      );
-
-      // Excluir fines de semana y feriados
-      if (dayOfWeek >= 1 && dayOfWeek <= 5 && !isHoliday) {
-        if (
-          currentDate.toDateString() === start.toDateString() &&
-          currentDate.toDateString() === end.toDateString()
-        ) {
-          totalHours += (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-        } else if (currentDate.toDateString() === start.toDateString()) {
-          const endOfDay = new Date(start);
-          endOfDay.setHours(17, 0, 0, 0); // Fin del día laboral a las 17:00
-          totalHours +=
-            (endOfDay.getTime() - start.getTime()) / (1000 * 60 * 60);
-        } else if (currentDate.toDateString() === end.toDateString()) {
-          const startOfDay = new Date(end);
-          startOfDay.setHours(9, 0, 0, 0); // Inicio del día laboral a las 9:00
-          totalHours +=
-            (end.getTime() - startOfDay.getTime()) / (1000 * 60 * 60);
-        } else {
-          totalHours += workHoursPerDay;
-        }
-      }
-
-      currentDate.setDate(currentDate.getDate() + 1);
-      currentDate.setHours(9, 0, 0, 0); // Asegura que cada día comience a las 9:00
-    }
-
-    return totalHours.toFixed(2);
-  };
-
   const filteredData = useMemo(() => {
     return fileData.filter((row) => {
-      const startDate = new Date(
-        row["Campo personalizado (Actual start)"] ?? ""
-      );
-      const matchesDateRange =
-        startDate >= dateRange.from && startDate <= dateRange.to;
-      const matchesSprint = row["Sprint"]
-        ?.toString()
-        .toLowerCase()
-        .includes(sprintFilter.toLowerCase());
+      // Extraer fechas de la fila
+      const startDate = row["Campo personalizado (Actual start)"]
+        ? new Date(row["Campo personalizado (Actual start)"])
+        : null;
+      const endDate = row["Resuelta"] ? new Date(row["Resuelta"]) : null;
 
+      // Validar si la fecha de inicio cae dentro del rango (si el rango está definido)
+      const matchesDateRange =
+        (!startDate ||
+          (startDate >= dateRange.from && startDate <= dateRange.to)) &&
+        (!endDate || endDate <= dateRange.to);
+
+      // Validar si el Sprint incluye el filtro (si el filtro está definido)
+      const matchesSprint =
+        !sprintFilter || // Si no hay filtro, siempre es verdadero
+        (row["Sprint"]?.toString()?.toLowerCase() ?? "").includes(
+          sprintFilter.toLowerCase()
+        );
+
+      // Incluir todo si no hay condiciones o si se cumplen las existentes
       return matchesDateRange && matchesSprint;
     });
-  }, [fileData, dateRange, sprintFilter, holidays]);
+  }, [fileData, dateRange, sprintFilter]);
 
   const totalHours = useMemo(() => {
     const total = filteredData.reduce((sum, row) => {
       const startDate = new Date(
-        row["Campo personalizado (Actual start)"] ?? ""
+        String(row["Campo personalizado (Actual start)"] ?? "")
       );
       const endDate = new Date(row["Resuelta"] ?? "");
 
-      const hours = parseFloat(calculateWorkingHours(startDate, endDate));
+      const hours = parseFloat(
+        calculateWorkingHours(startDate, endDate, holidays)
+      );
 
       return isNaN(hours) ? sum : sum + hours;
     }, 0);
@@ -375,63 +247,24 @@ export default function Dashboard() {
   }, [filteredData, holidays]);
 
   // Function to export filtered data to Excel with selected columns
-  const exportToExcel = () => {
-    const visibleColumns = columns
-      .filter((column) => columnVisibility[column.id as string])
-      .map((column) => column.id as string);
-
-    // Crear datos a exportar incluyendo columnas calculadas
-    const dataToExport = filteredData.map((row) => {
-      const filteredRow: { [key: string]: string | number } = {};
-      visibleColumns.forEach((col) => {
-        if (col === "diasLaborales") {
-          const startDate = new Date(
-            row["Campo personalizado (Actual start)"] ?? ""
-          );
-          const endDate = new Date(row["Resuelta"] ?? "");
-          filteredRow[col] = calculateWorkingDays(startDate, endDate);
-        } else if (col === "horasLaborales") {
-          const startDate = new Date(
-            row["Campo personalizado (Actual start)"] ?? ""
-          );
-          const endDate = new Date(row["Resuelta"] ?? "");
-          filteredRow[col] = calculateWorkingHours(startDate, endDate);
-        } else {
-          filteredRow[col] = row[col] ?? "";
-        }
-      });
-      return filteredRow;
-    });
-
-    // Crear encabezado para el total de horas
-    const totalHoursRow = { "Total Horas Laborales": totalHours };
-    const formattedDataToExport = [totalHoursRow, ...dataToExport];
-
-    const worksheet = XLSX.utils.json_to_sheet(formattedDataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
-
-    // Exportar a archivo Excel
-    XLSX.writeFile(workbook, "reportes_excelsis.xlsx");
-  };
 
   const table = useReactTable({
-    data: filteredData,
+    data: filteredData, // Usa datos filtrados
     columns,
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
     state: {
       sorting,
       columnFilters,
       columnVisibility,
       rowSelection,
     },
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
   });
 
   useEffect(() => {
@@ -441,22 +274,7 @@ export default function Dashboard() {
   return (
     <div className="container mx-auto p-4 overflow-x-auto">
       <h1 className="text-3xl font-bold mb-6">Dashboard de Datos</h1>
-
-      <div className="mb-6 w-full max-w-md flex flex-col">
-        <label
-          htmlFor="file-upload"
-          className="block text-sm font-medium text-gray-700 mb-2"
-        >
-          Cargar archivo CSV o Excel
-        </label>
-        <Input
-          id="file-upload"
-          type="file"
-          onChange={handleFileChange}
-          accept=".csv, .xlsx, .xls"
-          className="file:mr-6 file:py-2 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 file:w-auto file:overflow-visible h-12"
-        />
-      </div>
+      <FileUpload handleFileUpload={handleFileUpload} />
 
       <div className="mb-6 w-full max-w-md">
         <label
@@ -518,17 +336,10 @@ export default function Dashboard() {
               onChange={(e) => setSprintFilter(e.target.value)}
               className="max-w-sm"
             />
-            <div className="w-full">
-              <DatePickerWithRange
-                date={dateRange}
-                setDate={(date) =>
-                  setDateRange({
-                    from: date?.from ?? new Date(),
-                    to: date?.to ?? new Date(),
-                  })
-                }
-              />
-            </div>
+            <DateRangePicker
+              dateRange={dateRange}
+              setDateRange={setDateRange}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="ml-auto">
@@ -536,27 +347,39 @@ export default function Dashboard() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {table
-                  .getAllColumns()
-                  .filter((column) => column.getCanHide())
-                  .map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      className="capitalize"
-                      checked={column.getIsVisible()}
-                      onCheckedChange={(value) =>
-                        column.toggleVisibility(!!value)
-                      }
-                    >
-                      {column.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
+                {table.getAllColumns().map((column) => (
+                  <DropdownMenuCheckboxItem
+                    key={column.id}
+                    className="capitalize"
+                    checked={columnVisibility[column.id] ?? false}
+                    onCheckedChange={(value) =>
+                      setColumnVisibility((prev) => ({
+                        ...prev,
+                        [column.id]: value,
+                      }))
+                    }
+                  >
+                    {column.id}
+                  </DropdownMenuCheckboxItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
 
           <div>
-            <Button onClick={exportToExcel} variant="outline" className="mb-2">
+            <Button
+              onClick={() =>
+                exportToExcel(
+                  columns,
+                  columnVisibility,
+                  filteredData,
+                  holidays,
+                  totalHours
+                )
+              }
+              variant="outline"
+              className="mb-2"
+            >
               Exportar a Excel
             </Button>
             <p>Total de horas laborales: {totalHours} hrs</p>
