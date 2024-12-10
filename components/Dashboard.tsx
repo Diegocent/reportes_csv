@@ -48,6 +48,8 @@ import {
 } from "./utils/calcularHorasDias";
 import { parseCsvManually } from "./utils/parseCsv";
 import { exportToExcel } from "./utils/exportExcel";
+import Papa from "papaparse";
+import { parse, format } from "date-fns";
 
 type FileData = { [key: string]: string | number | null };
 
@@ -84,7 +86,99 @@ export default function Dashboard() {
     to: new Date(),
   });
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const extractCsvRowValues = (row: string, maxColumns: number): string[] => {
+    const values: string[] = [];
+    let current = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < row.length; i++) {
+      const char = row[i];
+
+      if (char === '"' && (i === 0 || row[i - 1] !== "\\")) {
+        // Cambiar estado de comillas
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        // Fin de valor actual si no estamos en comillas
+        values.push(current.trim());
+        current = "";
+      } else {
+        // Agregar carácter al valor actual
+        current += char;
+      }
+    }
+
+    // Agregar último valor
+    if (current) {
+      values.push(current.trim());
+    }
+
+    // Limpiar comillas externas y manejar dobles comillas escapadas
+    return values.slice(0, maxColumns).map((value) => {
+      if (value.startsWith('"') && value.endsWith('"')) {
+        return value.slice(1, -1).replace(/""/g, '"'); // Reemplazar dobles comillas
+      }
+      return value === '""' ? "" : value;
+    });
+  };
+
+  const alignColumns = (
+    headers: string[],
+    row: string[]
+  ): Record<string, string> => {
+    const alignedRow: Record<string, string> = {};
+    const headerCount: Record<string, number> = {};
+    let rowCorrected;
+    if (row.length <= 1) {
+      // console.log(
+      //   "array corregido ",
+      //   extractCsvRowValues(row[0], headers.length)
+      // );
+      rowCorrected = extractCsvRowValues(row[0], headers.length);
+    } else {
+      rowCorrected = row;
+    }
+    console.log("rowCorrected ", rowCorrected);
+    headers.forEach((header, index) => {
+      // Si el encabezado ya ha sido encontrado, incrementamos su contador
+      if (headerCount[header]) {
+        headerCount[header]++;
+        // Actualizamos la clave del encabezado con el número de aparición
+        alignedRow[`${header}_${headerCount[header]}`] =
+          rowCorrected[index] || "";
+      } else {
+        // Si es la primera vez que encontramos este encabezado, lo agregamos sin sufijo
+        headerCount[header] = 1;
+        alignedRow[header] = rowCorrected[index] || "";
+      }
+    });
+
+    return alignedRow;
+  };
+
+  /**
+   * Procesa el archivo CSV y normaliza las filas.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const parseCSV = async (file: File): Promise<any[]> => {
+    return new Promise((resolve, reject) => {
+      Papa.parse(file, {
+        skipEmptyLines: true,
+        complete: (results) => {
+          const rows = results.data as string[][];
+          const headers = rows[0] || []; // Detecta las cabeceras del archivo
+          console.log("headers ", headers);
+          rows.shift();
+
+          const alignedData = rows.map((row) => alignColumns(headers, row));
+
+          resolve(alignedData);
+        },
+        error: (error) => reject(error),
+      });
+    });
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) {
       alert("No se seleccionó ningún archivo.");
@@ -94,33 +188,16 @@ export default function Dashboard() {
     const fileExtension = file.name.split(".").pop()?.toLowerCase();
 
     if (fileExtension === "csv") {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const csvContent = e.target?.result as string;
-        console.log("Contenido del archivo:", csvContent);
+      const parsedData = parseCSV(file);
+      console.log("Datos procesados del CSV:", await parsedData);
 
-        try {
-          // Procesar el contenido del archivo
-          const parsedData = parseCsvManually(csvContent);
-          console.log("Datos CSV procesados:", parsedData);
-
-          if (parsedData.length > 0) {
-            setFileData(parsedData);
-            createColumns(Object.keys(parsedData[0])); // Crear columnas dinámicamente
-          } else {
-            alert("El archivo CSV no contiene datos válidos.");
-          }
-        } catch (error) {
-          console.error("Error procesando el archivo CSV:", error);
-          alert("Hubo un error al procesar el archivo CSV.");
-        }
-      };
-
-      reader.onerror = () => {
-        alert("Error leyendo el archivo.");
-      };
-
-      reader.readAsText(file); // Leer el archivo como texto
+      if ((await parsedData)?.length > 0) {
+        setFileData(await parsedData);
+        const data = await parsedData;
+        createColumns(Object.keys(data[0]));
+      } else {
+        alert("El archivo CSV no contiene datos válidos.");
+      }
     } else {
       alert("Por favor, suba un archivo en formato CSV.");
     }
@@ -158,7 +235,10 @@ export default function Dashboard() {
             "Campo personalizado (Actual start)"
           ) as Date | null;
           const endDate = row.getValue("Resuelta") as Date | null;
-          return calculateWorkingDays(startDate, endDate, holidays);
+          if (startDate && endDate) {
+            return calculateWorkingDays(startDate, endDate, holidays);
+          }
+          return "N/A"; // Si las fechas no están disponibles
         },
       });
     }
@@ -173,7 +253,10 @@ export default function Dashboard() {
             "Campo personalizado (Actual start)"
           ) as Date | null;
           const endDate = row.getValue("Resuelta") as Date | null;
-          return calculateWorkingHours(startDate, endDate, holidays);
+          if (startDate && endDate) {
+            return calculateWorkingHours(startDate, endDate, holidays);
+          }
+          return "N/A"; // Si las fechas no están disponibles
         },
       });
     }
@@ -181,12 +264,13 @@ export default function Dashboard() {
     setColumns(cols);
 
     // Sincronizar visibilidad de columnas
-    setColumnVisibility(() =>
-      headers.reduce((acc, header) => {
-        acc[header] = defaultVisibleColumns.includes(header);
-        return acc;
-      }, {} as VisibilityState)
-    );
+    setColumnVisibility(() => {
+      const visibility: VisibilityState = {};
+      headers.forEach((header) => {
+        visibility[header] = defaultVisibleColumns.includes(header);
+      });
+      return visibility;
+    });
   };
 
   const addHoliday = () => {
@@ -318,163 +402,167 @@ export default function Dashboard() {
       </div>
 
       {fileData.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between py-4">
-            <Input
-              placeholder="Filtrar por descripcion..."
-              value={
-                (table.getColumn("Resumen")?.getFilterValue() as string) ?? ""
-              }
-              onChange={(event) =>
-                table.getColumn("Resumen")?.setFilterValue(event.target.value)
-              }
-              className="max-w-sm"
-            />
-            <Input
-              placeholder="Filtrar por Sprint..."
-              value={sprintFilter}
-              onChange={(e) => setSprintFilter(e.target.value)}
-              className="max-w-sm"
-            />
-            <DateRangePicker
-              dateRange={dateRange}
-              setDateRange={setDateRange}
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="ml-auto">
-                  Columnas <ChevronDown className="ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {table.getAllColumns().map((column) => (
-                  <DropdownMenuCheckboxItem
-                    key={column.id}
-                    className="capitalize"
-                    checked={columnVisibility[column.id] ?? false}
-                    onCheckedChange={(value) =>
-                      setColumnVisibility((prev) => ({
-                        ...prev,
-                        [column.id]: value,
-                      }))
-                    }
-                  >
-                    {column.id}
-                  </DropdownMenuCheckboxItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-
-          <div>
-            <Button
-              onClick={() =>
-                exportToExcel(
-                  columns,
-                  columnVisibility,
-                  filteredData,
-                  holidays,
-                  totalHours
-                )
-              }
-              variant="outline"
-              className="mb-2"
-            >
-              Exportar a Excel
-            </Button>
-            <p>Total de horas laborales: {totalHours} hrs</p>
-          </div>
-
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id}>
-                        {flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {table.getRowModel().rows?.length ? (
-                  table.getRowModel().rows.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      data-state={row.getIsSelected() && "selected"}
+        <>
+          {console.log("el dato es: ", fileData)}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between py-4">
+              <Input
+                placeholder="Filtrar por descripcion..."
+                value={
+                  (table.getColumn("Resumen")?.getFilterValue() as string) ?? ""
+                }
+                onChange={(event) =>
+                  table.getColumn("Resumen")?.setFilterValue(event.target.value)
+                }
+                className="max-w-sm"
+              />
+              <Input
+                placeholder="Filtrar por Sprint..."
+                value={sprintFilter}
+                onChange={(e) => setSprintFilter(e.target.value)}
+                className="max-w-sm"
+              />
+              <DateRangePicker
+                dateRange={dateRange}
+                setDateRange={setDateRange}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="ml-auto">
+                    Columnas <ChevronDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {table.getAllColumns().map((column) => (
+                    <DropdownMenuCheckboxItem
+                      key={column.id}
+                      className="capitalize"
+                      checked={columnVisibility[column.id] ?? false}
+                      onCheckedChange={(value) =>
+                        setColumnVisibility((prev) => ({
+                          ...prev,
+                          [column.id]: value,
+                        }))
+                      }
                     >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
+                      {column.id}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <div>
+              <Button
+                onClick={() =>
+                  exportToExcel(
+                    columns,
+                    columnVisibility,
+                    filteredData,
+                    holidays,
+                    totalHours
+                  )
+                }
+                variant="outline"
+                className="mb-2"
+              >
+                Exportar a Excel
+              </Button>
+              <p>Total de horas laborales: {totalHours} hrs</p>
+            </div>
+
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  {table.getHeaderGroups().map((headerGroup) => (
+                    <TableRow key={headerGroup.id}>
+                      {headerGroup.headers.map((header) => (
+                        <TableHead key={header.id}>
                           {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
+                            header.column.columnDef.header,
+                            header.getContext()
                           )}
-                        </TableCell>
+                        </TableHead>
                       ))}
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columns.length}
-                      className="h-24 text-center"
-                    >
-                      No hay resultados.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="flex items-center justify-between space-x-2 py-4">
-            <div className="flex-1 text-sm text-muted-foreground">
-              {table.getFilteredSelectedRowModel().rows.length} de{" "}
-              {table.getFilteredRowModel().rows.length} fila(s) seleccionada(s).
-            </div>
-            <div className="flex items-center space-x-2">
-              <p className="text-sm font-medium">Filas por página</p>
-              <Select
-                value={`${pageSize}`}
-                onValueChange={(value) => setPageSize(Number(value))}
-              >
-                <SelectTrigger className="h-8 w-[70px]">
-                  <SelectValue placeholder={pageSize} />
-                </SelectTrigger>
-                <SelectContent side="top">
-                  {[10, 20, 30, 40, 50].map((pageSize) => (
-                    <SelectItem key={pageSize} value={`${pageSize}`}>
-                      {pageSize}
-                    </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
+                </TableHeader>
+                <TableBody>
+                  {table.getRowModel().rows?.length ? (
+                    table.getRowModel().rows.map((row) => (
+                      <TableRow
+                        key={row.id}
+                        data-state={row.getIsSelected() && "selected"}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id}>
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={columns.length}
+                        className="h-24 text-center"
+                      >
+                        No hay resultados.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </div>
-            <div className="space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.previousPage()}
-                disabled={!table.getCanPreviousPage()}
-              >
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => table.nextPage()}
-                disabled={!table.getCanNextPage()}
-              >
-                Siguiente
-              </Button>
+
+            <div className="flex items-center justify-between space-x-2 py-4">
+              <div className="flex-1 text-sm text-muted-foreground">
+                {table.getFilteredSelectedRowModel().rows.length} de{" "}
+                {table.getFilteredRowModel().rows.length} fila(s)
+                seleccionada(s).
+              </div>
+              <div className="flex items-center space-x-2">
+                <p className="text-sm font-medium">Filas por página</p>
+                <Select
+                  value={`${pageSize}`}
+                  onValueChange={(value) => setPageSize(Number(value))}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue placeholder={pageSize} />
+                  </SelectTrigger>
+                  <SelectContent side="top">
+                    {[10, 20, 30, 40, 50].map((pageSize) => (
+                      <SelectItem key={pageSize} value={`${pageSize}`}>
+                        {pageSize}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => table.previousPage()}
+                  disabled={!table.getCanPreviousPage()}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => table.nextPage()}
+                  disabled={!table.getCanNextPage()}
+                >
+                  Siguiente
+                </Button>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );
