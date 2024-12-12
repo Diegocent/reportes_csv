@@ -31,8 +31,6 @@ const calculateWorkingHours = (
   if (
     !start ||
     !end ||
-    !(start instanceof Date) ||
-    !(end instanceof Date) ||
     isNaN(start.getTime()) ||
     isNaN(end.getTime()) ||
     start >= end

@@ -46,10 +46,9 @@ import {
   calculateWorkingDays,
   calculateWorkingHours,
 } from "./utils/calcularHorasDias";
-import { parseCsvManually } from "./utils/parseCsv";
+import { parseCSV } from "./utils/parseCsv";
 import { exportToExcel } from "./utils/exportExcel";
-import Papa from "papaparse";
-import { parse, format } from "date-fns";
+import { format, parse, isValid } from "date-fns";
 
 type FileData = { [key: string]: string | number | null };
 
@@ -86,98 +85,6 @@ export default function Dashboard() {
     to: new Date(),
   });
 
-  const extractCsvRowValues = (row: string, maxColumns: number): string[] => {
-    const values: string[] = [];
-    let current = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < row.length; i++) {
-      const char = row[i];
-
-      if (char === '"' && (i === 0 || row[i - 1] !== "\\")) {
-        // Cambiar estado de comillas
-        inQuotes = !inQuotes;
-      } else if (char === "," && !inQuotes) {
-        // Fin de valor actual si no estamos en comillas
-        values.push(current.trim());
-        current = "";
-      } else {
-        // Agregar carácter al valor actual
-        current += char;
-      }
-    }
-
-    // Agregar último valor
-    if (current) {
-      values.push(current.trim());
-    }
-
-    // Limpiar comillas externas y manejar dobles comillas escapadas
-    return values.slice(0, maxColumns).map((value) => {
-      if (value.startsWith('"') && value.endsWith('"')) {
-        return value.slice(1, -1).replace(/""/g, '"'); // Reemplazar dobles comillas
-      }
-      return value === '""' ? "" : value;
-    });
-  };
-
-  const alignColumns = (
-    headers: string[],
-    row: string[]
-  ): Record<string, string> => {
-    const alignedRow: Record<string, string> = {};
-    const headerCount: Record<string, number> = {};
-    let rowCorrected;
-    if (row.length <= 1) {
-      // console.log(
-      //   "array corregido ",
-      //   extractCsvRowValues(row[0], headers.length)
-      // );
-      rowCorrected = extractCsvRowValues(row[0], headers.length);
-    } else {
-      rowCorrected = row;
-    }
-    console.log("rowCorrected ", rowCorrected);
-    headers.forEach((header, index) => {
-      // Si el encabezado ya ha sido encontrado, incrementamos su contador
-      if (headerCount[header]) {
-        headerCount[header]++;
-        // Actualizamos la clave del encabezado con el número de aparición
-        alignedRow[`${header}_${headerCount[header]}`] =
-          rowCorrected[index] || "";
-      } else {
-        // Si es la primera vez que encontramos este encabezado, lo agregamos sin sufijo
-        headerCount[header] = 1;
-        alignedRow[header] = rowCorrected[index] || "";
-      }
-    });
-
-    return alignedRow;
-  };
-
-  /**
-   * Procesa el archivo CSV y normaliza las filas.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const parseCSV = async (file: File): Promise<any[]> => {
-    return new Promise((resolve, reject) => {
-      Papa.parse(file, {
-        skipEmptyLines: true,
-        complete: (results) => {
-          const rows = results.data as string[][];
-          const headers = rows[0] || []; // Detecta las cabeceras del archivo
-          console.log("headers ", headers);
-          rows.shift();
-
-          const alignedData = rows.map((row) => alignColumns(headers, row));
-
-          resolve(alignedData);
-        },
-        error: (error) => reject(error),
-      });
-    });
-  };
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) {
@@ -201,6 +108,11 @@ export default function Dashboard() {
     } else {
       alert("Por favor, suba un archivo en formato CSV.");
     }
+  };
+
+  const parseDate = (dateString: string): Date | null => {
+    const parsed = parse(dateString, "yyyy-MM-dd HH:mm:ss", new Date());
+    return isValid(parsed) ? parsed : null;
   };
 
   const createColumns = (headers: string[]) => {
@@ -231,10 +143,13 @@ export default function Dashboard() {
         id: "diasLaborales",
         header: "Días laborales",
         cell: ({ row }) => {
-          const startDate = row.getValue(
+          const startDateRaw = row.getValue(
             "Campo personalizado (Actual start)"
-          ) as Date | null;
-          const endDate = row.getValue("Resuelta") as Date | null;
+          );
+          const endDateRaw = row.getValue("Resuelta");
+
+          const startDate = startDateRaw ? parseDate(startDateRaw) : null;
+          const endDate = endDateRaw ? parseDate(endDateRaw) : null;
           if (startDate && endDate) {
             return calculateWorkingDays(startDate, endDate, holidays);
           }
@@ -249,10 +164,13 @@ export default function Dashboard() {
         id: "horasLaborales",
         header: "Horas laborales",
         cell: ({ row }) => {
-          const startDate = row.getValue(
+          const startDateRaw = row.getValue(
             "Campo personalizado (Actual start)"
-          ) as Date | null;
-          const endDate = row.getValue("Resuelta") as Date | null;
+          );
+          const endDateRaw = row.getValue("Resuelta");
+
+          const startDate = startDateRaw ? parseDate(startDateRaw) : null;
+          const endDate = endDateRaw ? parseDate(endDateRaw) : null;
           if (startDate && endDate) {
             return calculateWorkingHours(startDate, endDate, holidays);
           }
@@ -291,15 +209,22 @@ export default function Dashboard() {
     return fileData.filter((row) => {
       // Extraer fechas de la fila
       const startDate = row["Campo personalizado (Actual start)"]
-        ? new Date(row["Campo personalizado (Actual start)"])
+        ? row["Campo personalizado (Actual start)"]
         : null;
-      const endDate = row["Resuelta"] ? new Date(row["Resuelta"]) : null;
-
+      const endDate = row["Resuelta"] ? row["Resuelta"] : null;
+      console.log("startDate ", startDate);
+      console.log("endDate ", endDate);
       // Validar si la fecha de inicio cae dentro del rango (si el rango está definido)
+      const inicio = format(dateRange.from, "yyyy-MM-dd HH:mm:ss");
+      const fin = format(dateRange.to, "yyyy-MM-dd HH:mm:ss");
+      console.log("inicio ", inicio);
+      console.log("fin ", fin);
       const matchesDateRange =
-        (!startDate ||
-          (startDate >= dateRange.from && startDate <= dateRange.to)) &&
-        (!endDate || endDate <= dateRange.to);
+        !startDate ||
+        (startDate >= inicio &&
+          startDate <= fin &&
+          (!endDate || endDate <= fin));
+      console.log("matchesDateRange ", matchesDateRange);
 
       // Validar si el Sprint incluye el filtro (si el filtro está definido)
       const matchesSprint =
@@ -353,6 +278,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     table.setPageSize(pageSize);
+    console.log("filteredData ", filteredData);
   }, [pageSize, table]);
 
   return (
@@ -403,7 +329,6 @@ export default function Dashboard() {
 
       {fileData.length > 0 && (
         <>
-          {console.log("el dato es: ", fileData)}
           <div className="space-y-4">
             <div className="flex items-center justify-between py-4">
               <Input

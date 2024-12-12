@@ -42,7 +42,7 @@ const exportToExcel = (
 
   // Crear encabezado para el total de horas
   const totalHoursRow = { "Total Horas Laborales": totalHours };
-  const formattedDataToExport = [totalHoursRow, ...dataToExport];
+  const formattedDataToExport = [...dataToExport, totalHoursRow];
 
   const worksheet = XLSX.utils.json_to_sheet(formattedDataToExport);
   const workbook = XLSX.utils.book_new();
