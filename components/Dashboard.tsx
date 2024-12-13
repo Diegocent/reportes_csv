@@ -49,6 +49,7 @@ import {
 import { parseCSV } from "./utils/parseCsv";
 import { exportToExcel } from "./utils/exportExcel";
 import { format, parse, isValid } from "date-fns";
+import Footer from "./Footer";
 
 type FileData = { [key: string]: string | number | null };
 
@@ -96,7 +97,6 @@ export default function Dashboard() {
 
     if (fileExtension === "csv") {
       const parsedData = parseCSV(file);
-      console.log("Datos procesados del CSV:", await parsedData);
 
       if ((await parsedData)?.length > 0) {
         setFileData(await parsedData);
@@ -148,8 +148,14 @@ export default function Dashboard() {
           );
           const endDateRaw = row.getValue("Resuelta");
 
-          const startDate = startDateRaw ? parseDate(startDateRaw) : null;
-          const endDate = endDateRaw ? parseDate(endDateRaw) : null;
+          const startDate =
+            startDateRaw && typeof startDateRaw === "string"
+              ? parseDate(startDateRaw)
+              : null;
+          const endDate =
+            endDateRaw && typeof endDateRaw === "string"
+              ? parseDate(endDateRaw)
+              : null;
           if (startDate && endDate) {
             return calculateWorkingDays(startDate, endDate, holidays);
           }
@@ -169,8 +175,14 @@ export default function Dashboard() {
           );
           const endDateRaw = row.getValue("Resuelta");
 
-          const startDate = startDateRaw ? parseDate(startDateRaw) : null;
-          const endDate = endDateRaw ? parseDate(endDateRaw) : null;
+          const startDate =
+            startDateRaw && typeof startDateRaw === "string"
+              ? parseDate(startDateRaw)
+              : null;
+          const endDate =
+            endDateRaw && typeof endDateRaw === "string"
+              ? parseDate(endDateRaw)
+              : null;
           if (startDate && endDate) {
             return calculateWorkingHours(startDate, endDate, holidays);
           }
@@ -187,6 +199,10 @@ export default function Dashboard() {
       headers.forEach((header) => {
         visibility[header] = defaultVisibleColumns.includes(header);
       });
+      visibility["diasLaborales"] =
+        defaultVisibleColumns.includes("diasLaborales");
+      visibility["horasLaborales"] =
+        defaultVisibleColumns.includes("horasLaborales");
       return visibility;
     });
   };
@@ -212,19 +228,14 @@ export default function Dashboard() {
         ? row["Campo personalizado (Actual start)"]
         : null;
       const endDate = row["Resuelta"] ? row["Resuelta"] : null;
-      console.log("startDate ", startDate);
-      console.log("endDate ", endDate);
       // Validar si la fecha de inicio cae dentro del rango (si el rango está definido)
       const inicio = format(dateRange.from, "yyyy-MM-dd HH:mm:ss");
       const fin = format(dateRange.to, "yyyy-MM-dd HH:mm:ss");
-      console.log("inicio ", inicio);
-      console.log("fin ", fin);
       const matchesDateRange =
         !startDate ||
         (startDate >= inicio &&
           startDate <= fin &&
           (!endDate || endDate <= fin));
-      console.log("matchesDateRange ", matchesDateRange);
 
       // Validar si el Sprint incluye el filtro (si el filtro está definido)
       const matchesSprint =
@@ -278,217 +289,242 @@ export default function Dashboard() {
 
   useEffect(() => {
     table.setPageSize(pageSize);
-    console.log("filteredData ", filteredData);
   }, [pageSize, table]);
 
   return (
-    <div className="container mx-auto p-4 overflow-x-auto">
-      <h1 className="text-3xl font-bold mb-6">Dashboard de Datos</h1>
-      <FileUpload handleFileUpload={handleFileUpload} />
+    <div className="min-h-screen flex flex-col">
+      <div className="flex-grow">
+        <div className="container mx-auto p-4 overflow-x-auto">
+          <h1 className="text-3xl font-bold mb-6">
+            Calculo de horas trabajadas
+          </h1>
+          <FileUpload handleFileUpload={handleFileUpload} />
 
-      <div className="mb-6 w-full max-w-md">
-        <label
-          htmlFor="holiday-input"
-          className="block text-sm font-medium text-gray-700 mb-2"
-        >
-          Agregar días feriados
-        </label>
-        <div className="flex space-x-2">
-          <Input
-            id="holiday-input"
-            type="date"
-            value={holidayInput}
-            onChange={(e) => setHolidayInput(e.target.value)}
-            className="flex-grow"
-          />
-          <Button onClick={addHoliday}>Agregar Feriado</Button>
-        </div>
-        {holidays.length > 0 && (
-          <div className="mt-2">
-            <h3 className="text-sm font-medium text-gray-700 mb-1">
-              Feriados agregados:
-            </h3>
-            <ul className="list-disc list-inside">
-              {holidays.map((holiday, index) => (
-                <li key={index} className="flex items-center">
-                  {holiday.toLocaleDateString()}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeHoliday(index)}
-                    className="ml-2 text-red-500"
-                  >
-                    x
-                  </Button>
-                </li>
-              ))}
-            </ul>
+          <div className="mb-6 w-full max-w-md">
+            <label
+              htmlFor="holiday-input"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
+              Agregar días feriados
+            </label>
+            <div className="flex space-x-2">
+              <Input
+                id="holiday-input"
+                type="date"
+                value={holidayInput}
+                onChange={(e) => setHolidayInput(e.target.value)}
+                className="flex-grow"
+              />
+              <Button onClick={addHoliday}>Agregar Feriado</Button>
+            </div>
+            {holidays.length > 0 && (
+              <div className="mt-2">
+                <h3 className="text-sm font-medium text-gray-700 mb-1">
+                  Feriados agregados:
+                </h3>
+                <ul className="list-disc list-inside">
+                  {holidays.map((holiday, index) => (
+                    <li key={index} className="flex items-center">
+                      {holiday.toLocaleDateString()}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeHoliday(index)}
+                        className="ml-2 text-red-500"
+                      >
+                        x
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {fileData.length > 0 && (
-        <>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between py-4">
-              <Input
-                placeholder="Filtrar por descripcion..."
-                value={
-                  (table.getColumn("Resumen")?.getFilterValue() as string) ?? ""
-                }
-                onChange={(event) =>
-                  table.getColumn("Resumen")?.setFilterValue(event.target.value)
-                }
-                className="max-w-sm"
-              />
-              <Input
-                placeholder="Filtrar por Sprint..."
-                value={sprintFilter}
-                onChange={(e) => setSprintFilter(e.target.value)}
-                className="max-w-sm"
-              />
-              <DateRangePicker
-                dateRange={dateRange}
-                setDateRange={setDateRange}
-              />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="ml-auto">
-                    Columnas <ChevronDown className="ml-2 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {table.getAllColumns().map((column) => (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      className="capitalize"
-                      checked={columnVisibility[column.id] ?? false}
-                      onCheckedChange={(value) =>
-                        setColumnVisibility((prev) => ({
-                          ...prev,
-                          [column.id]: value,
-                        }))
+          {fileData.length > 0 && (
+            <>
+              <div className="space-y-4">
+                {/* <div className="flex items-center justify-between py-4"> */}
+                <div className="flex flex-wrap items-center gap-4 w-full">
+                  <div className="flex-1 min-w-[200px]">
+                    <Input
+                      placeholder="Filtrar por descripción..."
+                      value={
+                        (table
+                          .getColumn("Resumen")
+                          ?.getFilterValue() as string) ?? ""
                       }
-                    >
-                      {column.id}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                      onChange={(event) =>
+                        table
+                          .getColumn("Resumen")
+                          ?.setFilterValue(event.target.value)
+                      }
+                      className="w-full"
+                    />
+                  </div>
 
-            <div>
-              <Button
-                onClick={() =>
-                  exportToExcel(
-                    columns,
-                    columnVisibility,
-                    filteredData,
-                    holidays,
-                    totalHours
-                  )
-                }
-                variant="outline"
-                className="mb-2"
-              >
-                Exportar a Excel
-              </Button>
-              <p>Total de horas laborales: {totalHours} hrs</p>
-            </div>
+                  <div className="flex-1 min-w-[200px]">
+                    <Input
+                      placeholder="Filtrar por Sprint..."
+                      value={sprintFilter}
+                      onChange={(e) => setSprintFilter(e.target.value)}
+                      className="w-full"
+                    />
+                  </div>
 
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  {table.getHeaderGroups().map((headerGroup) => (
-                    <TableRow key={headerGroup.id}>
-                      {headerGroup.headers.map((header) => (
-                        <TableHead key={header.id}>
-                          {flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableHeader>
-                <TableBody>
-                  {table.getRowModel().rows?.length ? (
-                    table.getRowModel().rows.map((row) => (
-                      <TableRow
-                        key={row.id}
-                        data-state={row.getIsSelected() && "selected"}
+                  <div className="flex-2 min-w-[200px]">
+                    <DateRangePicker
+                      dateRange={dateRange}
+                      setDateRange={setDateRange}
+                    />
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="w-full">
+                          Columnas <ChevronDown className="ml-2 h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        className="max-h-64 overflow-y-auto"
                       >
-                        {row.getVisibleCells().map((cell) => (
-                          <TableCell key={cell.id}>
-                            {flexRender(
-                              cell.column.columnDef.cell,
-                              cell.getContext()
-                            )}
-                          </TableCell>
+                        {table.getAllColumns().map((column) => (
+                          <DropdownMenuCheckboxItem
+                            key={column.id}
+                            className="capitalize"
+                            checked={columnVisibility[column.id] ?? false}
+                            onCheckedChange={(value) =>
+                              setColumnVisibility((prev) => ({
+                                ...prev,
+                                [column.id]: value,
+                              }))
+                            }
+                          >
+                            {column.id}
+                          </DropdownMenuCheckboxItem>
                         ))}
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        colSpan={columns.length}
-                        className="h-24 text-center"
-                      >
-                        No hay resultados.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
 
-            <div className="flex items-center justify-between space-x-2 py-4">
-              <div className="flex-1 text-sm text-muted-foreground">
-                {table.getFilteredSelectedRowModel().rows.length} de{" "}
-                {table.getFilteredRowModel().rows.length} fila(s)
-                seleccionada(s).
+                <div>
+                  <Button
+                    onClick={() =>
+                      exportToExcel(
+                        columns,
+                        columnVisibility,
+                        filteredData,
+                        holidays,
+                        totalHours
+                      )
+                    }
+                    variant="outline"
+                    className="mb-2"
+                  >
+                    Exportar a Excel
+                  </Button>
+                  <p>Total de horas laborales: {totalHours} hrs</p>
+                </div>
+
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      {table.getHeaderGroups().map((headerGroup) => (
+                        <TableRow key={headerGroup.id}>
+                          {headerGroup.headers.map((header) => (
+                            <TableHead key={header.id}>
+                              {flexRender(
+                                header.column.columnDef.header,
+                                header.getContext()
+                              )}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableHeader>
+                    <TableBody>
+                      {table.getRowModel().rows?.length ? (
+                        table.getRowModel().rows.map((row) => (
+                          <TableRow
+                            key={row.id}
+                            data-state={row.getIsSelected() && "selected"}
+                          >
+                            {row.getVisibleCells().map((cell) => (
+                              <TableCell key={cell.id}>
+                                {flexRender(
+                                  cell.column.columnDef.cell,
+                                  cell.getContext()
+                                )}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={columns.length}
+                            className="h-24 text-center"
+                          >
+                            No hay resultados.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex items-center justify-between space-x-2 py-4">
+                  <div className="flex-1 text-sm text-muted-foreground">
+                    {table.getFilteredSelectedRowModel().rows.length} de{" "}
+                    {table.getFilteredRowModel().rows.length} fila(s)
+                    seleccionada(s).
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <p className="text-sm font-medium">Filas por página</p>
+                    <Select
+                      value={`${pageSize}`}
+                      onValueChange={(value) => setPageSize(Number(value))}
+                    >
+                      <SelectTrigger className="h-8 w-[70px]">
+                        <SelectValue placeholder={pageSize} />
+                      </SelectTrigger>
+                      <SelectContent side="top">
+                        {[10, 20, 30, 40, 50].map((pageSize) => (
+                          <SelectItem key={pageSize} value={`${pageSize}`}>
+                            {pageSize}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => table.previousPage()}
+                      disabled={!table.getCanPreviousPage()}
+                    >
+                      Anterior
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => table.nextPage()}
+                      disabled={!table.getCanNextPage()}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center space-x-2">
-                <p className="text-sm font-medium">Filas por página</p>
-                <Select
-                  value={`${pageSize}`}
-                  onValueChange={(value) => setPageSize(Number(value))}
-                >
-                  <SelectTrigger className="h-8 w-[70px]">
-                    <SelectValue placeholder={pageSize} />
-                  </SelectTrigger>
-                  <SelectContent side="top">
-                    {[10, 20, 30, 40, 50].map((pageSize) => (
-                      <SelectItem key={pageSize} value={`${pageSize}`}>
-                        {pageSize}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => table.previousPage()}
-                  disabled={!table.getCanPreviousPage()}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => table.nextPage()}
-                  disabled={!table.getCanNextPage()}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+            </>
+          )}
+        </div>
+      </div>
+      <Footer />
     </div>
   );
 }

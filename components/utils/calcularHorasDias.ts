@@ -3,7 +3,7 @@ const calculateWorkingDays = (
   end: Date | null,
   holidays: Date[]
 ): number | string => {
-  if (!start || !end || start >= end) return "N/A";
+  if (!start || !end || start >= end) return "0";
 
   let count = 0;
   const curDate = new Date(start);
@@ -35,7 +35,7 @@ const calculateWorkingHours = (
     isNaN(end.getTime()) ||
     start >= end
   ) {
-    return "N/A"; // Validate both dates and return "N/A" if invalid or start >= end
+    return "0"; // Validate both dates and return "N/A" if invalid or start >= end
   }
 
   const workHoursPerDay = 8;
